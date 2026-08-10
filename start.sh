@@ -14,6 +14,9 @@ if ! python3 -c "import fastapi" 2>/dev/null; then
     pip3 install -r requirements.txt
 fi
 
+echo "执行数据库迁移..."
+python3 -m app.infrastructure.database
+
 echo "启动服务: http://localhost:9900"
 echo "管理后台: http://localhost:9900"
 echo "健康检查: http://localhost:9900/health"

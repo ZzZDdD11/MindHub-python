@@ -150,6 +150,9 @@ class GatewayService:
             dispatch_result = self.dispatcher.dispatch(request.model)
             channel = dispatch_result.channel
             request.model = dispatch_result.upstream_model
+            request.dispatched_channel_id = channel.id
+            request.dispatched_channel_name = channel.name
+            request.upstream_model = dispatch_result.upstream_model
             url = _build_url(channel, request)
             body = dict(request.body)
             body["stream"] = True

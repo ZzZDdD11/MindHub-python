@@ -16,7 +16,10 @@ class FakeGateway:
 
     def forward(self, request):
         self.request = request
-        return ProxyResponseEntity(status_code=200, body='{"ok": true}')
+        return ProxyResponseEntity(
+            status_code=200,
+            body='{"choices":[{"message":{"content":"ok"}}]}',
+        )
 
 
 class FakeLogRepository:
@@ -40,7 +43,7 @@ def test_proxy_service_consumes_verified_call_context() -> None:
 
     status, body = service.forward('{"model":"gpt-4o","messages":[]}', {}, context)
 
-    assert (status, body) == (200, {"ok": True})
+    assert (status, body) == (200, {"choices": [{"message": {"content": "ok"}}]})
     assert gateway.request.context is context
     assert gateway.request.api_key is None
     assert logs.entries[0].trace_id == "request-123"

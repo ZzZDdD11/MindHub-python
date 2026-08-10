@@ -364,6 +364,9 @@ sse-starlette==2.2.1
 # 使用已有 MySQL
 mysql -u root -p < docs/waliapi.sql
 
+# 配置好 DB_* 环境变量后执行所有版本化迁移
+python -m app.infrastructure.database
+
 # 或使用 Docker 启动 MySQL（与 Java 版共用同一套基础设施）
 cd /path/to/WaLiAPI-Java/docs/dev-ops
 docker-compose -f docker-compose-environment-aliyun.yml up -d
@@ -398,10 +401,12 @@ LOG_LEVEL=info
 # 方式一：启动脚本
 ./start.sh
 
-# 方式二：直接运行
+# 方式二：先执行迁移，再直接运行
+python -m app.infrastructure.database
 python -m uvicorn app.main:app --host 0.0.0.0 --port 9900
 
-# 方式三：开发模式（热重载）
+# 方式三：先执行迁移，再开发模式（热重载）
+python -m app.infrastructure.database
 python -m uvicorn app.main:app --host 0.0.0.0 --port 9900 --reload
 ```
 

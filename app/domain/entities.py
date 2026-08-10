@@ -62,6 +62,9 @@ class ProxyRequestEntity:
     protocol_type: str = "openai"
     headers: dict = field(default_factory=dict)
     context: Optional[ProxyCallContext] = None
+    dispatched_channel_id: Optional[str] = None
+    dispatched_channel_name: Optional[str] = None
+    upstream_model: Optional[str] = None
 
 
 @dataclass
@@ -111,6 +114,24 @@ class RequestLogEntity:
     stream_outcome: Optional[str] = None
     created_at: Optional[str] = None
     seq: Optional[int] = None
+
+
+@dataclass
+class ConversationRecordEntity:
+    id: str
+    request_log_id: str
+    trace_id: str
+    origin: str
+    model: str
+    protocol_type: str
+    stream: bool
+    request_payload: str
+    response_payload: str
+    completed_at: str
+    api_key_id: Optional[str] = None
+    channel_id: Optional[str] = None
+    channel_name: Optional[str] = None
+    upstream_model: Optional[str] = None
 
 
 @dataclass
