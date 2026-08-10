@@ -157,7 +157,8 @@ class DashboardService:
                              request_body=e.request_body, response_choices=e.response_choices,
                              risk_level=e.risk_level, risk_score=e.risk_score, risk_summary=e.risk_summary,
                              security_action=e.security_action, sanitized=e.sanitized,
-                             blocked_reason=e.blocked_reason, trace_id=e.trace_id, created_at=e.created_at)
+                             blocked_reason=e.blocked_reason, trace_id=e.trace_id,
+                             stream_outcome=e.stream_outcome, created_at=e.created_at)
 
     def _calculate_health_score(self, stats):
         """Calculate health score aligned with Java StatsService logic.

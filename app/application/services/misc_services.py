@@ -1,4 +1,5 @@
 """Security, Agent, and Proxy application services."""
+import asyncio
 import uuid
 import json
 import logging
@@ -14,6 +15,7 @@ from app.domain.entities import (
     AgentConfigEntity, SecurityBuiltinRuleEntity, SecurityCustomRuleEntity,
     ProxyCallContext, RequestLogEntity, ProxyRequestEntity,
 )
+from app.domain.gateway import UpstreamStreamError
 from app.domain.protocol import ProtocolDetector
 from app.types.enums import RiskLevel
 
@@ -199,94 +201,86 @@ class ProxyService:
             status = proxy_response.status_code if proxy_response.status_code and proxy_response.status_code > 0 else 502
             return status, {"error": {"message": proxy_response.error_message or "upstream_error", "type": "upstream_error"}}
 
-    def forward_stream(self, body: str, headers: dict, context: ProxyCallContext):
-        """Returns a generator yielding SSE chunks."""
+    async def forward_stream(self, body: str, headers: dict, context: ProxyCallContext):
+        """Yield SSE events and record their actual terminal outcome."""
         start = time.time()
         protocol = ProtocolDetector.detect(headers, body)
         try:
             body_json = json.loads(body)
         except Exception:
-            yield 'data: {"error":{"message":"Invalid JSON body","type":"invalid_request_error"}}\n\n'
+            yield self._sse_error("Invalid JSON body", "invalid_request_error")
             return
 
         model = body_json.get("model")
         if not model:
-            yield 'data: {"error":{"message":"Missing model field","type":"invalid_request_error"}}\n\n'
+            yield self._sse_error("Missing model field", "invalid_request_error")
             return
 
         scan_result = None
         if self.settings.enabled:
             scan_result = self.scanner.scan(body, "request", self.settings)
             if scan_result.blocked:
-                log_id = str(uuid.uuid4()).replace("-", "")
                 self._record_log(self._build_log(
-                    log_id, context, model, protocol, True, 403, scan_result, body, None,
+                    str(uuid.uuid4()).replace("-", ""), context, model, protocol, True, 403,
+                    scan_result, body, None,
                     "Request blocked: " + (scan_result.blocked_reason or ""),
+                    stream_outcome="blocked",
                 ))
-                yield 'data: {"error":{"message":"Request blocked by security policy: ' + (scan_result.blocked_reason or "") + '","type":"security_error"}}\n\n'
+                yield self._sse_error("Request blocked by security policy", "security_error")
                 return
 
         proxy_request = ProxyRequestEntity(
             model=model, body=body_json, stream=True,
             protocol_type=protocol, headers=headers, context=context,
         )
-
+        outcome = "failed"
+        status_code = 502
+        error_message = None
         response_buffer = []
-        error_occurred = []
 
-        def on_chunk(chunk):
-            response_buffer.append(chunk)
+        try:
+            async for chunk in self.gateway.forward_stream_async(proxy_request):
+                if chunk == "[DONE]":
+                    outcome = "completed"
+                    status_code = 200
+                    yield "data: [DONE]\n\n"
+                    return
+                response_buffer.append(chunk)
+                yield f"data: {chunk}\n\n"
 
-        def on_error(err):
-            error_occurred.append(err)
+            error_message = "Upstream stream ended before [DONE]"
+            yield self._sse_error("Upstream stream ended unexpectedly", "upstream_error")
+        except asyncio.CancelledError:
+            outcome = "canceled"
+            status_code = 499
+            error_message = "Client disconnected"
+            raise
+        except UpstreamStreamError as error:
+            status_code = error.status_code
+            error_message = str(error)
+            yield self._sse_error("Upstream stream failed", "upstream_error")
+        except Exception:
+            logger.exception("Unexpected stream forwarding failure")
+            error_message = "Unexpected stream forwarding failure"
+            yield self._sse_error("Upstream stream failed", "upstream_error")
+        finally:
+            response_text = "".join(response_buffer)[:65536] if response_buffer else None
+            self._record_log(self._build_log(
+                str(uuid.uuid4()).replace("-", ""), context, model, protocol, True,
+                status_code, scan_result, body, response_text, error_message,
+                duration_ms=int((time.time() - start) * 1000),
+                stream_outcome=outcome,
+            ))
 
-        def on_complete():
-            pass
-
-        # Run the stream forward in a thread and yield chunks
-        import queue
-        import threading
-        q = queue.Queue()
-        done_marker = object()
-
-        def _on_chunk(chunk):
-            q.put(chunk)
-
-        def _on_error(err):
-            q.put(err)
-
-        def _on_complete():
-            q.put(done_marker)
-
-        def _run():
-            self.gateway.forward_stream(proxy_request, _on_chunk, _on_error, _on_complete)
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-
-        while True:
-            item = q.get()
-            if item is done_marker:
-                break
-            if isinstance(item, Exception):
-                yield 'data: {"error":{"message":"' + str(item) + '","type":"upstream_error"}}\n\n'
-                break
-            yield f"data: {item}\n\n"
-
-        yield "data: [DONE]\n\n"
-
-        log_id = str(uuid.uuid4()).replace("-", "")
-        response_text = "".join(response_buffer)[:65536] if response_buffer else None
-        self._record_log(self._build_log(
-            log_id, context, model, protocol, True,
-            200, scan_result, body, response_text, None,
-            duration_ms=int((time.time() - start) * 1000),
-        ))
+    @staticmethod
+    def _sse_error(message: str, error_type: str) -> str:
+        return f"data: {json.dumps({'error': {'message': message, 'type': error_type}})}\n\n"
 
     def _build_log(self, log_id, context, model, protocol, is_stream, status_code, scan_result,
                    request_body, response_choices, error_message,
                    channel_id=None, channel_name=None, upstream_model=None,
-                   prompt_tokens=0, completion_tokens=0, total_tokens=0, duration_ms=0):
+                   prompt_tokens=0, completion_tokens=0, total_tokens=0, duration_ms=0,
+                   stream_outcome=None):
         risk_level = "Clean"
         risk_score = 0
         risk_summary = None
@@ -314,7 +308,8 @@ class ProxyService:
             risk_level=risk_level, risk_score=risk_score, risk_summary=risk_summary,
             security_action=security_action, sanitized=sanitized, blocked_reason=blocked_reason,
             client_ip=context.client_ip, error_message=error_message, request_body=truncated_body,
-            response_choices=truncated_choices, trace_id=context.request_id, created_at=_now(),
+            response_choices=truncated_choices, trace_id=context.request_id,
+            stream_outcome=stream_outcome, created_at=_now(),
         )
 
     def _record_log(self, entry):

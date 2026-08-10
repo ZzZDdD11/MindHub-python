@@ -108,6 +108,7 @@ class RequestLogEntity:
     request_body: Optional[str] = None
     response_choices: Optional[str] = None
     trace_id: Optional[str] = None
+    stream_outcome: Optional[str] = None
     created_at: Optional[str] = None
     seq: Optional[int] = None
 

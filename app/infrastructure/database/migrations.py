@@ -9,7 +9,7 @@ from typing import Iterable
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-MIGRATIONS_DIR = Path(__file__).with_name("migrations")
+MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
 _MIGRATION_NAME = re.compile(r"^(\d+)_[A-Za-z0-9][A-Za-z0-9_-]*\.sql$")
 
 

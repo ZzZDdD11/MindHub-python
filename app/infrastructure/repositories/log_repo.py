@@ -13,7 +13,7 @@ _ALL_COLUMNS = (
     "mode, protocol_type, stream, is_retry, status_code, prompt_tokens, completion_tokens, "
     "total_tokens, duration_ms, risk_level, risk_score, risk_summary, security_action, "
     "sanitized, blocked_reason, client_ip, error_message, request_body, response_choices, "
-    "trace_id, created_at"
+    "trace_id, stream_outcome, created_at"
 )
 
 
@@ -26,12 +26,12 @@ class LogRepository:
                 "model, upstream_model, mode, protocol_type, stream, is_retry, status_code, "
                 "prompt_tokens, completion_tokens, total_tokens, duration_ms, risk_level, risk_score, "
                 "risk_summary, security_action, sanitized, blocked_reason, client_ip, error_message, "
-                "request_body, response_choices, trace_id, created_at) "
+                "request_body, response_choices, trace_id, stream_outcome, created_at) "
                 "VALUES (:id, :api_key_id, :api_key_name, :channel_id, :channel_name, "
                 ":model, :upstream_model, :mode, :protocol_type, :stream, :is_retry, :status_code, "
                 ":prompt_tokens, :completion_tokens, :total_tokens, :duration_ms, :risk_level, :risk_score, "
                 ":risk_summary, :security_action, :sanitized, :blocked_reason, :client_ip, :error_message, "
-                ":request_body, :response_choices, :trace_id, :created_at)"
+                ":request_body, :response_choices, :trace_id, :stream_outcome, :created_at)"
             ), {
                 "id": log.id, "api_key_id": log.api_key_id, "api_key_name": log.api_key_name,
                 "channel_id": log.channel_id, "channel_name": log.channel_name,
@@ -46,7 +46,7 @@ class LogRepository:
                 "blocked_reason": log.blocked_reason, "client_ip": log.client_ip,
                 "error_message": log.error_message, "request_body": log.request_body,
                 "response_choices": log.response_choices, "trace_id": log.trace_id,
-                "created_at": log.created_at,
+                "stream_outcome": log.stream_outcome, "created_at": log.created_at,
             })
 
     def get_log_by_id(self, log_id: str) -> Optional[RequestLogEntity]:
@@ -129,5 +129,5 @@ class LogRepository:
             blocked_reason=row["blocked_reason"], client_ip=row["client_ip"],
             error_message=row["error_message"], request_body=row["request_body"],
             response_choices=row["response_choices"], trace_id=row["trace_id"],
-            created_at=row["created_at"],
+            stream_outcome=row["stream_outcome"], created_at=row["created_at"],
         )

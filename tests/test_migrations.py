@@ -2,7 +2,12 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
-from app.infrastructure.database.migrations import apply_pending_migrations
+from app.infrastructure.database.migrations import MIGRATIONS_DIR, apply_pending_migrations
+
+
+def test_default_migration_directory_contains_versioned_sql() -> None:
+    assert (MIGRATIONS_DIR / "0001_schema_migrations.sql").is_file()
+    assert (MIGRATIONS_DIR / "0002_request_log_stream_outcome.sql").is_file()
 
 
 def test_applies_ordered_migrations_only_once(tmp_path: Path) -> None:
