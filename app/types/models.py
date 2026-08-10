@@ -80,6 +80,7 @@ class RequestLogDTO(BaseModel):
     sanitized: bool = False
     blocked_reason: Optional[str] = None
     trace_id: Optional[str] = None
+    stream_outcome: Optional[str] = None
     created_at: Optional[str] = None
 
 

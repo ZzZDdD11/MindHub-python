@@ -1,7 +1,7 @@
 """Gateway service: dispatches to channels, forwards requests (sync + streaming)."""
 import logging
 import time
-from typing import Callable, Optional
+from collections.abc import AsyncIterator, Callable
 
 from app.domain.entities import ProxyRequestEntity, ProxyResponseEntity
 
@@ -64,6 +64,12 @@ def _extract_tokens(response_body: str):
     return 0, 0, 0
 
 
+class UpstreamStreamError(Exception):
+    def __init__(self, message: str, status_code: int = 502) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class GatewayService:
     """Proxy service that dispatches requests to upstream channels."""
 
@@ -109,8 +115,6 @@ class GatewayService:
                        on_chunk: Callable[[str], None],
                        on_error: Callable[[Exception], None],
                        on_complete: Callable[[], None]):
-        import json
-
         try:
             dispatch_result = self.dispatcher.dispatch(request.model)
             channel = dispatch_result.channel
@@ -139,6 +143,35 @@ class GatewayService:
         except Exception as e:
             logger.error(f"Stream forward error: {e}")
             on_error(e)
+
+    async def forward_stream_async(self, request: ProxyRequestEntity) -> AsyncIterator[str]:
+        """Yield upstream SSE payloads and close the upstream stream on cancellation."""
+        try:
+            dispatch_result = self.dispatcher.dispatch(request.model)
+            channel = dispatch_result.channel
+            request.model = dispatch_result.upstream_model
+            url = _build_url(channel, request)
+            body = dict(request.body)
+            body["stream"] = True
+            headers = _build_headers(channel, request)
+
+            timeout = _httpx_mod.Timeout(connect=30.0, read=300.0, write=30.0, pool=10.0)
+            async with _httpx_mod.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", url, json=body, headers=headers) as response:
+                    if not response.is_success:
+                        raise UpstreamStreamError(f"Upstream HTTP {response.status_code}", response.status_code)
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].lstrip()
+                        if data == "[DONE]":
+                            yield data
+                            return
+                        yield data
+        except UpstreamStreamError:
+            raise
+        except _httpx_mod.HTTPError as error:
+            raise UpstreamStreamError("Upstream stream failed") from error
 
     def test_channel(self, channel) -> bool:
         try:
