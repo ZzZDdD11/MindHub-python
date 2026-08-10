@@ -22,6 +22,17 @@ def _success(data=None):
     return {"code": "0000", "info": "\u6210\u529f", "data": data}
 
 
+def _proxy_context(request: Request):
+    from app.domain.entities import ProxyCallContext
+
+    return ProxyCallContext(
+        request_id=request.state.request_id,
+        api_key_id=request.state.api_key_id,
+        api_key_name=request.state.api_key_name,
+        client_ip=request.client.host if request.client else None,
+    )
+
+
 # ==================== Gateway Controller ====================
 
 gateway_router = APIRouter()
@@ -33,15 +44,16 @@ async def chat_completions(request: Request):
     body = await request.body()
     body_str = body.decode("utf-8")
     headers = {k.lower(): v for k, v in request.headers.items()}
+    context = _proxy_context(request)
     accept = request.headers.get("accept", "")
     is_stream = ("text/event-stream" in accept) or ('"stream"' in body_str and "true" in body_str)
     if is_stream:
         return StreamingResponse(
-            container.proxy_service.forward_stream(body_str, headers, client_ip=request.client.host if request.client else None),
+            container.proxy_service.forward_stream(body_str, headers, context),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
-    status, result = container.proxy_service.forward(body_str, headers, client_ip=request.client.host if request.client else None)
+    status, result = container.proxy_service.forward(body_str, headers, context)
     return JSONResponse(status_code=status, content=result)
 
 
@@ -56,7 +68,7 @@ async def proxy_generic(request: Request):
     container = get_container()
     body_str = (await request.body()).decode("utf-8")
     headers = {k.lower(): v for k, v in request.headers.items()}
-    status, result = container.proxy_service.forward(body_str, headers, client_ip=request.client.host if request.client else None)
+    status, result = container.proxy_service.forward(body_str, headers, _proxy_context(request))
     return JSONResponse(status_code=status, content=result)
 
 
