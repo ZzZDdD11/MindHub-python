@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import config
 from app.api.middleware.auth import ApiKeyAuthMiddleware
+from app.api.middleware.request_context import RequestContextMiddleware
 from app.api.controllers.routes import (
     gateway_router, channel_router, apikey_router, dashboard_router,
     kb_router, agent_router, security_router, mcp_router,
@@ -30,11 +31,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
     max_age=3600,
 )
 
 # API key auth middleware
 app.add_middleware(ApiKeyAuthMiddleware)
+
+# Must be registered last so it wraps authentication and every route response.
+app.add_middleware(RequestContextMiddleware)
 
 # Routers
 app.include_router(gateway_router)
@@ -49,10 +54,13 @@ app.include_router(mcp_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    logger.error("Unhandled exception", exc_info=True)
+    request_id = getattr(request.state, "request_id", None)
+    headers = {"X-Request-ID": request_id} if request_id else None
     return JSONResponse(
         status_code=500,
-        content={"code": "0001", "info": str(exc), "data": None},
+        content={"code": "0001", "info": "Internal server error", "data": None},
+        headers=headers,
     )
 
 
