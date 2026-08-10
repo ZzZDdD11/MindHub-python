@@ -1,0 +1,2 @@
+-- schema_migrations is created by the runner before user migrations execute.
+-- This baseline file reserves the first version for deployments adopting migrations.
