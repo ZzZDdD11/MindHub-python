@@ -44,6 +44,15 @@ class DispatchResult:
     success: bool = True
 
 
+@dataclass(frozen=True)
+class ProxyCallContext:
+    request_id: str
+    origin: str = "external"
+    api_key_id: Optional[str] = None
+    api_key_name: Optional[str] = None
+    client_ip: Optional[str] = None
+
+
 @dataclass
 class ProxyRequestEntity:
     model: str
@@ -52,6 +61,7 @@ class ProxyRequestEntity:
     api_key: Optional[str] = None
     protocol_type: str = "openai"
     headers: dict = field(default_factory=dict)
+    context: Optional[ProxyCallContext] = None
 
 
 @dataclass

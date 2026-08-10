@@ -43,6 +43,8 @@ def _build_headers(channel, request: ProxyRequestEntity) -> dict:
         custom_headers = channel.config.get("headers")
         if isinstance(custom_headers, dict):
             headers.update(custom_headers)
+    if request.context:
+        headers["X-Request-ID"] = request.context.request_id
     return headers
 
 

@@ -12,7 +12,7 @@ from app.types.models import (
 )
 from app.domain.entities import (
     AgentConfigEntity, SecurityBuiltinRuleEntity, SecurityCustomRuleEntity,
-    RequestLogEntity, ProxyRequestEntity,
+    ProxyCallContext, RequestLogEntity, ProxyRequestEntity,
 )
 from app.domain.protocol import ProtocolDetector
 from app.types.enums import RiskLevel
@@ -138,7 +138,7 @@ class ProxyService:
         self.log_repo = log_repository
         self.security_repo = security_repository
 
-    def forward(self, body: str, headers: dict, client_ip: str = None):
+    def forward(self, body: str, headers: dict, context: ProxyCallContext):
         start = time.time()
         protocol = ProtocolDetector.detect(headers, body)
         try:
@@ -162,23 +162,25 @@ class ProxyService:
             scan_result = self.scanner.scan(body, "request", self.settings)
             if scan_result.blocked:
                 log_id = str(uuid.uuid4()).replace("-", "")
-                self._record_log(self._build_log(log_id, ProtocolDetector.extract_api_key(headers), model, protocol,
-                                                  body_json.get("stream", False), 403, scan_result, client_ip, body, None,
-                                                  "Request blocked: " + (scan_result.blocked_reason or "")))
+                self._record_log(self._build_log(
+                    log_id, context, model, protocol, body_json.get("stream", False), 403,
+                    scan_result, body, None,
+                    "Request blocked: " + (scan_result.blocked_reason or ""),
+                ))
                 return 403, {"error": {"message": "Request blocked by security policy: " + (scan_result.blocked_reason or ""), "type": "security_error"}}
 
         is_stream = body_json.get("stream", False)
         proxy_request = ProxyRequestEntity(
             model=model, body=body_json, stream=is_stream,
-            api_key=ProtocolDetector.extract_api_key(headers), protocol_type=protocol, headers=headers,
+            protocol_type=protocol, headers=headers, context=context,
         )
         proxy_response = self.gateway.forward(proxy_request)
 
         log_id = str(uuid.uuid4()).replace("-", "")
         self._record_log(self._build_log(
-            log_id, ProtocolDetector.extract_api_key(headers), model, protocol, is_stream,
+            log_id, context, model, protocol, is_stream,
             proxy_response.status_code if proxy_response.success else (proxy_response.status_code or 502),
-            scan_result, client_ip, body, proxy_response.body if proxy_response.success else None,
+            scan_result, body, proxy_response.body if proxy_response.success else None,
             proxy_response.error_message if not proxy_response.success else None,
             channel_id=proxy_response.channel_id, channel_name=proxy_response.channel_name,
             upstream_model=proxy_response.upstream_model, prompt_tokens=proxy_response.prompt_tokens,
@@ -197,7 +199,7 @@ class ProxyService:
             status = proxy_response.status_code if proxy_response.status_code and proxy_response.status_code > 0 else 502
             return status, {"error": {"message": proxy_response.error_message or "upstream_error", "type": "upstream_error"}}
 
-    def forward_stream(self, body: str, headers: dict, client_ip: str = None):
+    def forward_stream(self, body: str, headers: dict, context: ProxyCallContext):
         """Returns a generator yielding SSE chunks."""
         start = time.time()
         protocol = ProtocolDetector.detect(headers, body)
@@ -217,15 +219,16 @@ class ProxyService:
             scan_result = self.scanner.scan(body, "request", self.settings)
             if scan_result.blocked:
                 log_id = str(uuid.uuid4()).replace("-", "")
-                self._record_log(self._build_log(log_id, ProtocolDetector.extract_api_key(headers), model, protocol,
-                                                  True, 403, scan_result, client_ip, body, None,
-                                                  "Request blocked: " + (scan_result.blocked_reason or "")))
+                self._record_log(self._build_log(
+                    log_id, context, model, protocol, True, 403, scan_result, body, None,
+                    "Request blocked: " + (scan_result.blocked_reason or ""),
+                ))
                 yield 'data: {"error":{"message":"Request blocked by security policy: ' + (scan_result.blocked_reason or "") + '","type":"security_error"}}\n\n'
                 return
 
         proxy_request = ProxyRequestEntity(
             model=model, body=body_json, stream=True,
-            api_key=ProtocolDetector.extract_api_key(headers), protocol_type=protocol, headers=headers,
+            protocol_type=protocol, headers=headers, context=context,
         )
 
         response_buffer = []
@@ -275,13 +278,13 @@ class ProxyService:
         log_id = str(uuid.uuid4()).replace("-", "")
         response_text = "".join(response_buffer)[:65536] if response_buffer else None
         self._record_log(self._build_log(
-            log_id, ProtocolDetector.extract_api_key(headers), model, protocol, True,
-            200, scan_result, client_ip, body, response_text, None,
+            log_id, context, model, protocol, True,
+            200, scan_result, body, response_text, None,
             duration_ms=int((time.time() - start) * 1000),
         ))
 
-    def _build_log(self, log_id, api_key, model, protocol, is_stream, status_code, scan_result,
-                   client_ip, request_body, response_choices, error_message,
+    def _build_log(self, log_id, context, model, protocol, is_stream, status_code, scan_result,
+                   request_body, response_choices, error_message,
                    channel_id=None, channel_name=None, upstream_model=None,
                    prompt_tokens=0, completion_tokens=0, total_tokens=0, duration_ms=0):
         risk_level = "Clean"
@@ -303,14 +306,15 @@ class ProxyService:
         truncated_body = request_body[:65536] if request_body else None
         truncated_choices = response_choices[:65536] if response_choices else None
         return RequestLogEntity(
-            id=log_id, api_key_id=api_key, channel_id=channel_id, channel_name=channel_name,
+            id=log_id, api_key_id=context.api_key_id, api_key_name=context.api_key_name,
+            channel_id=channel_id, channel_name=channel_name,
             model=model, upstream_model=upstream_model, mode="chat", protocol_type=protocol,
             stream=is_stream, status_code=status_code, prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens, total_tokens=total_tokens, duration_ms=duration_ms,
             risk_level=risk_level, risk_score=risk_score, risk_summary=risk_summary,
             security_action=security_action, sanitized=sanitized, blocked_reason=blocked_reason,
-            client_ip=client_ip, error_message=error_message, request_body=truncated_body,
-            response_choices=truncated_choices, trace_id=log_id, created_at=_now(),
+            client_ip=context.client_ip, error_message=error_message, request_body=truncated_body,
+            response_choices=truncated_choices, trace_id=context.request_id, created_at=_now(),
         )
 
     def _record_log(self, entry):
