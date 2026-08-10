@@ -1,7 +1,10 @@
 """API key authentication middleware."""
 import logging
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+from app.infrastructure.repositories.channel_repo import ChannelRepository
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,10 @@ WHITELIST_PREFIXES = (
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, repository: ChannelRepository | None = None):
+        super().__init__(app)
+        self.repository = repository or ChannelRepository()
+
     async def dispatch(self, request, call_next):
         path = request.url.path
 
@@ -29,14 +36,32 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
 
         api_key = self._extract_api_key(request)
         if not api_key:
-            logger.warning(f"Missing API key for path: {path}")
+            logger.warning("Missing API key for path: %s", path)
+            return self._authentication_error("Missing API key")
+
+        try:
+            verified_key = self.repository.get_api_key_by_key(api_key)
+        except Exception:
+            logger.exception("API key lookup failed")
             return JSONResponse(
-                status_code=401,
-                content={"error": {"message": "Missing API key", "type": "authentication_error"}},
+                status_code=503,
+                content={"error": {"message": "Authentication service unavailable", "type": "server_error"}},
             )
 
-        request.state.api_key = api_key
+        if not verified_key or not verified_key.id:
+            logger.warning("Rejected invalid API key for path: %s", path)
+            return self._authentication_error("Invalid API key")
+
+        request.state.api_key_id = verified_key.id
+        request.state.api_key_name = verified_key.name
         return await call_next(request)
+
+    @staticmethod
+    def _authentication_error(message: str):
+        return JSONResponse(
+            status_code=401,
+            content={"error": {"message": message, "type": "authentication_error"}},
+        )
 
     def _extract_api_key(self, request):
         auth = request.headers.get("authorization")
