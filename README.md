@@ -1,8 +1,6 @@
 # WaLiAPI-Python — AI 网关与知识库平台（Python 版）
 
-> 与 [WaLiAPI-Java](https://github.com/fuzhengwei/WaLiAPI-Java) 功能对等的 Python 实现，采用 FastAPI + DDD 分层架构。
->
-> 作者：小傅哥 [bugstack.cn](https://bugstack.cn)
+> 基于 FastAPI 与 DDD 分层架构构建的 AI 网关与知识库平台。
 
 ---
 
