@@ -135,6 +135,16 @@ class ConversationRecordEntity:
 
 
 @dataclass
+class ConversationCandidateEntity:
+    id: str
+    conversation_record_id: str
+    status: str
+    eligibility_policy_version: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass
 class LogStatsEntity:
     total_requests: int = 0
     total_tokens: int = 0
