@@ -134,13 +134,15 @@ class ProxyService:
     """Application service for proxying requests (sync + stream) with security scanning and logging."""
 
     def __init__(self, gateway_service, security_scanner, security_settings, log_repository,
-                 security_repository=None, conversation_record_repository=None):
+                 security_repository=None, conversation_record_repository=None,
+                 conversation_candidate_service=None):
         self.gateway = gateway_service
         self.scanner = security_scanner
         self.settings = security_settings
         self.log_repo = log_repository
         self.security_repo = security_repository
         self.conversation_record_repo = conversation_record_repository
+        self.conversation_candidate_service = conversation_candidate_service
 
     def forward(self, body: str, headers: dict, context: ProxyCallContext):
         start = time.time()
@@ -218,10 +220,11 @@ class ProxyService:
             duration_ms=int((time.time() - start) * 1000),
         )
         if self._record_log(log_entry):
-            self._record_completed_conversation(
+            record = self._record_completed_conversation(
                 log_entry, context, client_request_body,
                 json.dumps(result, ensure_ascii=False, separators=(",", ":")),
             )
+            self._enqueue_conversation_candidate(record)
         return proxy_response.status_code, result
 
     async def forward_stream(self, body: str, headers: dict, context: ProxyCallContext):
@@ -300,7 +303,10 @@ class ProxyService:
                 stream_outcome=outcome,
             )
             if self._record_log(log_entry) and outcome == "completed":
-                self._record_completed_conversation(log_entry, context, body, full_response_payload)
+                record = self._record_completed_conversation(
+                    log_entry, context, body, full_response_payload,
+                )
+                self._enqueue_conversation_candidate(record)
 
     @staticmethod
     def _sse_error(message: str, error_type: str) -> str:
@@ -364,26 +370,36 @@ class ProxyService:
         if (not self.conversation_record_repo
                 or not self._is_conversation_payload(request_payload)
                 or not response_payload):
-            return
+            return None
+        record = ConversationRecordEntity(
+            id=uuid.uuid4().hex,
+            request_log_id=log_entry.id,
+            trace_id=log_entry.trace_id,
+            origin=context.origin,
+            api_key_id=log_entry.api_key_id,
+            channel_id=log_entry.channel_id,
+            channel_name=log_entry.channel_name,
+            model=log_entry.model,
+            upstream_model=log_entry.upstream_model,
+            protocol_type=log_entry.protocol_type or "openai",
+            stream=log_entry.stream,
+            request_payload=request_payload,
+            response_payload=response_payload,
+            completed_at=log_entry.created_at,
+        )
         try:
-            self.conversation_record_repo.create_if_absent(ConversationRecordEntity(
-                id=uuid.uuid4().hex,
-                request_log_id=log_entry.id,
-                trace_id=log_entry.trace_id,
-                origin=context.origin,
-                api_key_id=log_entry.api_key_id,
-                channel_id=log_entry.channel_id,
-                channel_name=log_entry.channel_name,
-                model=log_entry.model,
-                upstream_model=log_entry.upstream_model,
-                protocol_type=log_entry.protocol_type or "openai",
-                stream=log_entry.stream,
-                request_payload=request_payload,
-                response_payload=response_payload,
-                completed_at=log_entry.created_at,
-            ))
+            return self.conversation_record_repo.create_if_absent(record)
         except Exception:
             logger.exception("Failed to insert completed conversation record")
+            return None
+
+    def _enqueue_conversation_candidate(self, record):
+        if not record or not self.conversation_candidate_service:
+            return
+        try:
+            self.conversation_candidate_service.enqueue_record(record)
+        except Exception:
+            logger.exception("Failed to enqueue conversation candidate")
 
     def _record_log(self, entry):
         try:

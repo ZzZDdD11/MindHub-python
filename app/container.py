@@ -6,6 +6,7 @@ from app.config import config
 from app.infrastructure.repositories.channel_repo import ChannelRepository
 from app.infrastructure.repositories.log_repo import LogRepository
 from app.infrastructure.repositories.conversation_record_repo import ConversationRecordRepository
+from app.infrastructure.repositories.conversation_candidate_repo import ConversationCandidateRepository
 from app.infrastructure.repositories.security_repo import SecurityRepository
 from app.infrastructure.repositories.kb_repo import KbRepository
 from app.infrastructure.repositories.agent_repo import AgentRepository
@@ -16,6 +17,7 @@ from app.domain.knowledge import TextSplitter, EmbedderService, RetrieverService
 from app.domain.agent_service import AgentChatService
 from app.application.services.channel_dashboard import ChannelService, DashboardService
 from app.application.services.kb_service import KbService
+from app.application.services.conversation_candidate_service import ConversationCandidateService
 from app.application.services.misc_services import SecurityService, AgentService, ProxyService, McpService
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ class Container:
         self.channel_repo = ChannelRepository()
         self.log_repo = LogRepository()
         self.conversation_record_repo = ConversationRecordRepository()
+        self.conversation_candidate_repo = ConversationCandidateRepository()
         self.security_repo = SecurityRepository()
         self.kb_repo = KbRepository()
         self.agent_repo = AgentRepository()
@@ -59,8 +62,13 @@ class Container:
         self.kb_service = KbService(self.kb_repo, self.rag, self.text_splitter, self.embedder)
         self.security_service = SecurityService(self.security_repo)
         self.agent_service = AgentService(self.agent_repo, self.agent_chat)
-        self.proxy_service = ProxyService(self.gateway, self.security_scanner, self.security_settings,
-                                          self.log_repo, self.security_repo, self.conversation_record_repo)
+        self.conversation_candidate_service = ConversationCandidateService(
+            self.conversation_record_repo, self.conversation_candidate_repo,
+        )
+        self.proxy_service = ProxyService(
+            self.gateway, self.security_scanner, self.security_settings, self.log_repo,
+            self.security_repo, self.conversation_record_repo, self.conversation_candidate_service,
+        )
         self.mcp_service = McpService(self.kb_service)
 
 
