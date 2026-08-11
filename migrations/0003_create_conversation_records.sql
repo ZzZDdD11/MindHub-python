@@ -1,0 +1,20 @@
+CREATE TABLE conversation_records (
+    id VARCHAR(64) NOT NULL,
+    request_log_id VARCHAR(64) NOT NULL,
+    trace_id VARCHAR(64) NOT NULL,
+    origin VARCHAR(32) NOT NULL,
+    api_key_id VARCHAR(64) DEFAULT NULL,
+    channel_id VARCHAR(64) DEFAULT NULL,
+    channel_name VARCHAR(128) DEFAULT NULL,
+    model VARCHAR(128) NOT NULL,
+    upstream_model VARCHAR(128) DEFAULT NULL,
+    protocol_type VARCHAR(32) NOT NULL,
+    stream TINYINT NOT NULL DEFAULT 0,
+    request_payload MEDIUMTEXT NOT NULL,
+    response_payload MEDIUMTEXT NOT NULL,
+    completed_at VARCHAR(32) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_conversation_records_request_log_id (request_log_id),
+    KEY idx_conversation_records_trace_id (trace_id),
+    KEY idx_conversation_records_completed_at (completed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='完整网关对话记录';

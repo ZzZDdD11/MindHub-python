@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 9900
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9900"]
+CMD ["sh", "-c", "python -m app.infrastructure.database && exec uvicorn app.main:app --host 0.0.0.0 --port 9900"]

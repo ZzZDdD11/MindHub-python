@@ -12,8 +12,8 @@ from app.types.models import (
     SecurityBuiltinRuleDTO, SecurityCustomRuleDTO, SecurityFindingDTO,
 )
 from app.domain.entities import (
-    AgentConfigEntity, SecurityBuiltinRuleEntity, SecurityCustomRuleEntity,
-    ProxyCallContext, RequestLogEntity, ProxyRequestEntity,
+    AgentConfigEntity, ConversationRecordEntity, SecurityBuiltinRuleEntity,
+    SecurityCustomRuleEntity, ProxyCallContext, RequestLogEntity, ProxyRequestEntity,
 )
 from app.domain.gateway import UpstreamStreamError
 from app.domain.protocol import ProtocolDetector
@@ -133,22 +133,25 @@ class AgentService:
 class ProxyService:
     """Application service for proxying requests (sync + stream) with security scanning and logging."""
 
-    def __init__(self, gateway_service, security_scanner, security_settings, log_repository, security_repository=None):
+    def __init__(self, gateway_service, security_scanner, security_settings, log_repository,
+                 security_repository=None, conversation_record_repository=None):
         self.gateway = gateway_service
         self.scanner = security_scanner
         self.settings = security_settings
         self.log_repo = log_repository
         self.security_repo = security_repository
+        self.conversation_record_repo = conversation_record_repository
 
     def forward(self, body: str, headers: dict, context: ProxyCallContext):
         start = time.time()
+        client_request_body = body
         protocol = ProtocolDetector.detect(headers, body)
         try:
             body_json = json.loads(body)
         except Exception:
             return 400, {"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}}
 
-        # Responses API protocol: convert to OpenAI Chat Completions format before forwarding
+        # Responses API protocol: convert to OpenAI Chat Completions format before forwarding.
         if protocol == "responses":
             from app.domain.responses_converter import ResponsesConverter
             converted = ResponsesConverter.responses_to_openai(body)
@@ -177,29 +180,49 @@ class ProxyService:
             protocol_type=protocol, headers=headers, context=context,
         )
         proxy_response = self.gateway.forward(proxy_request)
+        if not proxy_response.success:
+            status = proxy_response.status_code if proxy_response.status_code and proxy_response.status_code > 0 else 502
+            self._record_log(self._build_log(
+                str(uuid.uuid4()).replace("-", ""), context, model, protocol, is_stream,
+                status, scan_result, body, None, proxy_response.error_message,
+                channel_id=proxy_response.channel_id, channel_name=proxy_response.channel_name,
+                upstream_model=proxy_response.upstream_model,
+                duration_ms=int((time.time() - start) * 1000),
+            ))
+            return status, {"error": {"message": proxy_response.error_message or "upstream_error", "type": "upstream_error"}}
 
-        log_id = str(uuid.uuid4()).replace("-", "")
-        self._record_log(self._build_log(
-            log_id, context, model, protocol, is_stream,
-            proxy_response.status_code if proxy_response.success else (proxy_response.status_code or 502),
-            scan_result, body, proxy_response.body if proxy_response.success else None,
-            proxy_response.error_message if not proxy_response.success else None,
+        try:
+            upstream_result = json.loads(proxy_response.body)
+            if not self._is_valid_chat_response(upstream_result):
+                raise ValueError("Upstream response does not contain a chat completion")
+            result = upstream_result
+            if protocol == "responses":
+                from app.domain.responses_converter import ResponsesConverter
+                result = json.loads(ResponsesConverter.openai_to_responses(proxy_response.body, model))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            self._record_log(self._build_log(
+                str(uuid.uuid4()).replace("-", ""), context, model, protocol, is_stream,
+                502, scan_result, body, None, "Invalid upstream response payload",
+                channel_id=proxy_response.channel_id, channel_name=proxy_response.channel_name,
+                upstream_model=proxy_response.upstream_model,
+                duration_ms=int((time.time() - start) * 1000),
+            ))
+            return 502, {"error": {"message": "Invalid upstream response payload", "type": "upstream_error"}}
+
+        log_entry = self._build_log(
+            str(uuid.uuid4()).replace("-", ""), context, model, protocol, is_stream,
+            proxy_response.status_code, scan_result, body, proxy_response.body, None,
             channel_id=proxy_response.channel_id, channel_name=proxy_response.channel_name,
             upstream_model=proxy_response.upstream_model, prompt_tokens=proxy_response.prompt_tokens,
             completion_tokens=proxy_response.completion_tokens, total_tokens=proxy_response.total_tokens,
             duration_ms=int((time.time() - start) * 1000),
-        ))
-
-        if proxy_response.success:
-            result = json.loads(proxy_response.body) if proxy_response.body else {}
-            # Convert OpenAI response back to Responses API format
-            if protocol == "responses":
-                from app.domain.responses_converter import ResponsesConverter
-                result = json.loads(ResponsesConverter.openai_to_responses(proxy_response.body, model))
-            return proxy_response.status_code, result
-        else:
-            status = proxy_response.status_code if proxy_response.status_code and proxy_response.status_code > 0 else 502
-            return status, {"error": {"message": proxy_response.error_message or "upstream_error", "type": "upstream_error"}}
+        )
+        if self._record_log(log_entry):
+            self._record_completed_conversation(
+                log_entry, context, client_request_body,
+                json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+            )
+        return proxy_response.status_code, result
 
     async def forward_stream(self, body: str, headers: dict, context: ProxyCallContext):
         """Yield SSE events and record their actual terminal outcome."""
@@ -240,20 +263,22 @@ class ProxyService:
 
         try:
             async for chunk in self.gateway.forward_stream_async(proxy_request):
+                event = f"data: {chunk}\n\n"
+                response_buffer.append(event)
                 if chunk == "[DONE]":
                     outcome = "completed"
                     status_code = 200
-                    yield "data: [DONE]\n\n"
+                    yield event
                     return
-                response_buffer.append(chunk)
-                yield f"data: {chunk}\n\n"
+                yield event
 
             error_message = "Upstream stream ended before [DONE]"
             yield self._sse_error("Upstream stream ended unexpectedly", "upstream_error")
         except asyncio.CancelledError:
-            outcome = "canceled"
-            status_code = 499
-            error_message = "Client disconnected"
+            if outcome != "completed":
+                outcome = "canceled"
+                status_code = 499
+                error_message = "Client disconnected"
             raise
         except UpstreamStreamError as error:
             status_code = error.status_code
@@ -264,13 +289,18 @@ class ProxyService:
             error_message = "Unexpected stream forwarding failure"
             yield self._sse_error("Upstream stream failed", "upstream_error")
         finally:
-            response_text = "".join(response_buffer)[:65536] if response_buffer else None
-            self._record_log(self._build_log(
+            full_response_payload = "".join(response_buffer) if response_buffer else None
+            log_entry = self._build_log(
                 str(uuid.uuid4()).replace("-", ""), context, model, protocol, True,
-                status_code, scan_result, body, response_text, error_message,
+                status_code, scan_result, body, full_response_payload, error_message,
+                channel_id=proxy_request.dispatched_channel_id,
+                channel_name=proxy_request.dispatched_channel_name,
+                upstream_model=proxy_request.upstream_model,
                 duration_ms=int((time.time() - start) * 1000),
                 stream_outcome=outcome,
-            ))
+            )
+            if self._record_log(log_entry) and outcome == "completed":
+                self._record_completed_conversation(log_entry, context, body, full_response_payload)
 
     @staticmethod
     def _sse_error(message: str, error_type: str) -> str:
@@ -312,11 +342,56 @@ class ProxyService:
             stream_outcome=stream_outcome, created_at=_now(),
         )
 
+    @staticmethod
+    def _is_valid_chat_response(response: object) -> bool:
+        if not isinstance(response, dict) or "error" in response:
+            return False
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return False
+        first_choice = choices[0]
+        return isinstance(first_choice, dict) and isinstance(first_choice.get("message"), dict)
+
+    @staticmethod
+    def _is_conversation_payload(request_payload: str) -> bool:
+        try:
+            request_json = json.loads(request_payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return isinstance(request_json.get("messages"), list) or "input" in request_json
+
+    def _record_completed_conversation(self, log_entry, context, request_payload, response_payload):
+        if (not self.conversation_record_repo
+                or not self._is_conversation_payload(request_payload)
+                or not response_payload):
+            return
+        try:
+            self.conversation_record_repo.create_if_absent(ConversationRecordEntity(
+                id=uuid.uuid4().hex,
+                request_log_id=log_entry.id,
+                trace_id=log_entry.trace_id,
+                origin=context.origin,
+                api_key_id=log_entry.api_key_id,
+                channel_id=log_entry.channel_id,
+                channel_name=log_entry.channel_name,
+                model=log_entry.model,
+                upstream_model=log_entry.upstream_model,
+                protocol_type=log_entry.protocol_type or "openai",
+                stream=log_entry.stream,
+                request_payload=request_payload,
+                response_payload=response_payload,
+                completed_at=log_entry.created_at,
+            ))
+        except Exception:
+            logger.exception("Failed to insert completed conversation record")
+
     def _record_log(self, entry):
         try:
             self.log_repo.insert_log(entry)
-        except Exception as e:
-            logger.warning(f"Failed to insert request log: {e}")
+            return True
+        except Exception as error:
+            logger.warning("Failed to insert request log: %s", error)
+            return False
 
 
 class McpService:

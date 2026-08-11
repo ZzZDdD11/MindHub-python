@@ -5,6 +5,7 @@ from functools import lru_cache
 from app.config import config
 from app.infrastructure.repositories.channel_repo import ChannelRepository
 from app.infrastructure.repositories.log_repo import LogRepository
+from app.infrastructure.repositories.conversation_record_repo import ConversationRecordRepository
 from app.infrastructure.repositories.security_repo import SecurityRepository
 from app.infrastructure.repositories.kb_repo import KbRepository
 from app.infrastructure.repositories.agent_repo import AgentRepository
@@ -27,6 +28,7 @@ class Container:
         # Repositories
         self.channel_repo = ChannelRepository()
         self.log_repo = LogRepository()
+        self.conversation_record_repo = ConversationRecordRepository()
         self.security_repo = SecurityRepository()
         self.kb_repo = KbRepository()
         self.agent_repo = AgentRepository()
@@ -58,7 +60,7 @@ class Container:
         self.security_service = SecurityService(self.security_repo)
         self.agent_service = AgentService(self.agent_repo, self.agent_chat)
         self.proxy_service = ProxyService(self.gateway, self.security_scanner, self.security_settings,
-                                          self.log_repo, self.security_repo)
+                                          self.log_repo, self.security_repo, self.conversation_record_repo)
         self.mcp_service = McpService(self.kb_service)
 
 
