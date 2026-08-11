@@ -13,7 +13,7 @@ from app.api.middleware.auth import ApiKeyAuthMiddleware
 from app.api.middleware.request_context import RequestContextMiddleware
 from app.api.controllers.routes import (
     gateway_router, channel_router, apikey_router, dashboard_router,
-    kb_router, agent_router, security_router, mcp_router,
+    kb_router, agent_router, security_router, admin_knowledge_router, mcp_router,
 )
 
 logging.basicConfig(
@@ -49,6 +49,7 @@ app.include_router(dashboard_router)
 app.include_router(kb_router)
 app.include_router(agent_router)
 app.include_router(security_router)
+app.include_router(admin_knowledge_router)
 app.include_router(mcp_router)
 
 

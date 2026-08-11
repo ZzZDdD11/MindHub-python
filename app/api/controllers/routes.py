@@ -1,6 +1,7 @@
 """All FastAPI route controllers."""
 import json
 import logging
+from dataclasses import asdict, is_dataclass
 from typing import Optional
 
 from fastapi import APIRouter, Request, Response, Depends, HTTPException, Query
@@ -12,8 +13,9 @@ from app.types.response import Response as ApiResponse, AppException
 from app.types.models import (
     ChannelDTO, ApiKeyDTO, CreateKbDTO, KbKnowledgeBaseDTO, UploadDocDTO,
     KbAskRequestDTO, KbSearchRequestDTO, AgentConfigDTO, AgentChatRequestDTO,
-    SecurityCustomRuleDTO,
+    CandidateReviewDTO, KnowledgeDraftDTO, KnowledgePublishDTO, SecurityCustomRuleDTO,
 )
+from app.api.dependencies.admin import require_admin_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +410,101 @@ async def list_findings(page: int = 1, size: int = 20):
 @security_router.get("/findings/by-log/{log_id}")
 async def get_findings_by_log_id(log_id: str):
     return _success(get_container().security_service.get_findings_by_log_id(log_id))
+
+
+# ==================== Knowledge Lifecycle Admin Controller ====================
+
+admin_knowledge_router = APIRouter(
+    prefix="/api/v1/admin/knowledge", dependencies=[Depends(require_admin_api_key)],
+)
+
+
+def _admin_data(value):
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return {key: _admin_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_admin_data(item) for item in value]
+    return value
+
+
+def _admin_call(operation):
+    try:
+        return _success(_admin_data(operation()))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@admin_knowledge_router.get("/candidates")
+async def list_knowledge_candidates(status: str = "pending_review"):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.list_candidates(status))
+
+
+@admin_knowledge_router.get("/candidates/{candidate_id}")
+async def get_knowledge_candidate(candidate_id: str):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.get_candidate_detail(candidate_id))
+
+
+@admin_knowledge_router.post("/candidates/{candidate_id}/approve")
+async def approve_knowledge_candidate(candidate_id: str, dto: CandidateReviewDTO):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.approve_candidate(candidate_id, dto.note))
+
+
+@admin_knowledge_router.post("/candidates/{candidate_id}/reject")
+async def reject_knowledge_candidate(candidate_id: str, dto: CandidateReviewDTO):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.reject_candidate(candidate_id, dto.note))
+
+
+@admin_knowledge_router.post("/candidates/{candidate_id}/drafts/manual")
+async def create_manual_knowledge_draft(candidate_id: str, dto: KnowledgeDraftDTO):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.create_manual_draft(
+        candidate_id, dto.title, dto.summary, dto.content, dto.tags,
+    ))
+
+
+@admin_knowledge_router.post("/candidates/{candidate_id}/drafts/ai")
+async def create_ai_knowledge_draft(candidate_id: str):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.generate_ai_draft(candidate_id))
+
+
+@admin_knowledge_router.get("/drafts/{draft_id}")
+async def get_knowledge_draft(draft_id: str):
+    return _admin_call(lambda: _get_draft_or_raise(draft_id))
+
+
+@admin_knowledge_router.put("/drafts/{draft_id}")
+async def update_knowledge_draft(draft_id: str, dto: KnowledgeDraftDTO):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.update_draft(
+        draft_id, dto.title, dto.summary, dto.content, dto.tags,
+    ))
+
+
+@admin_knowledge_router.post("/drafts/{draft_id}/publish")
+async def publish_knowledge_draft(draft_id: str, dto: KnowledgePublishDTO):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_service.publish_draft(draft_id, dto.kb_id))
+
+
+@admin_knowledge_router.get("/cards")
+async def list_knowledge_cards(kb_id: Optional[str] = None):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_repo.list_cards(kb_id))
+
+
+@admin_knowledge_router.get("/wiki/{kb_id}")
+async def list_knowledge_wiki(kb_id: str):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_repo.list_wiki_pages(kb_id))
+
+
+@admin_knowledge_router.get("/graph/{kb_id}")
+async def list_knowledge_graph(kb_id: str, entity: Optional[str] = None):
+    return _admin_call(lambda: get_container().knowledge_lifecycle_repo.list_graph(kb_id, entity))
+
+
+def _get_draft_or_raise(draft_id):
+    draft = get_container().knowledge_lifecycle_repo.get_draft(draft_id)
+    if not draft:
+        raise ValueError("Draft not found")
+    return draft
 
 
 # ==================== MCP Controller ====================

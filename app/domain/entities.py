@@ -142,6 +142,92 @@ class ConversationCandidateEntity:
     eligibility_policy_version: str
     created_at: str
     updated_at: str
+    reviewed_at: Optional[str] = None
+    review_note: Optional[str] = None
+
+
+@dataclass
+class KnowledgeDraftEntity:
+    id: str
+    candidate_id: str
+    revision: int
+    title: str
+    summary: str
+    content: str
+    tags: list
+    generation_mode: str
+    status: str
+    graph_suggestion: Optional[dict]
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class KnowledgeCardEntity:
+    id: str
+    candidate_id: str
+    status: str
+    current_version: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class KnowledgeCardVersionEntity:
+    id: str
+    card_id: str
+    version: int
+    kb_id: str
+    title: str
+    summary: str
+    content: str
+    tags: list
+    source_draft_id: str
+    published_at: str
+
+
+@dataclass
+class KnowledgeProjectionEntity:
+    id: str
+    card_version_id: str
+    projection_type: str
+    external_id: Optional[str]
+    created_at: str
+
+
+@dataclass
+class KnowledgeWikiPageEntity:
+    id: str
+    kb_id: str
+    card_version_id: str
+    title: str
+    slug: str
+    content: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class KnowledgeGraphNodeEntity:
+    id: str
+    kb_id: str
+    name: str
+    normalized_name: str
+    entity_type: str
+    created_at: str
+
+
+@dataclass
+class KnowledgeGraphEdgeEntity:
+    id: str
+    kb_id: str
+    source_node_id: str
+    target_node_id: str
+    relation_type: str
+    source_card_version_id: str
+    evidence: str
+    confidence: float
+    created_at: str
 
 
 @dataclass

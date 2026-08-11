@@ -391,6 +391,11 @@ SERVER_PORT=9900
 SECURITY_ENABLED=true
 SECURITY_MODE=audit
 
+# 知识沉淀管理（仅访问 /api/v1/admin/knowledge 时必需）
+ADMIN_API_KEY=<strong-random-admin-secret>
+# AI 草稿与图谱抽取（使用现有已配置渠道）
+KNOWLEDGE_PIPELINE_MODEL=<configured-chat-model>
+
 # 日志
 LOG_LEVEL=info
 ```

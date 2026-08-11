@@ -16,6 +16,7 @@ const state={
     dashboard:{},channels:[],apiKeys:[],agents:[],logs:[],
     kb:[],kbDocs:[],kbConv:[],kbSources:[],kbIndexStatus:null,
     kbSearchResults:null,kbTags:[],
+    knowledgeLifecycle:{candidates:[],cards:[],error:null,adminKey:'',selectedCandidate:null},
     security:{builtin:[],custom:[],findings:[]},
     secPolicy:{}
   }
@@ -37,7 +38,7 @@ function switchTab(id){
   }
   const loaders={
     dashboard:loadDashboard,channels:loadChannels,apikeys:loadApiKeys,
-    agents:loadAgents,logs:loadLogs,knowledge:loadKb,
+    agents:loadAgents,logs:loadLogs,knowledge:loadKb,knowledgeLifecycle:loadKnowledgeLifecycle,
     security:loadSecurity,usage:fillUsageModels
   };
   if(loaders[id])loaders[id]();
@@ -49,7 +50,7 @@ function updatePage(id){
   if(!container)return;
   const renderers={
     dashboard:pgDashboard,channels:pgChannels,apikeys:pgApiKeys,
-    agents:pgAgents,logs:pgLogs,knowledge:pgKb,
+    agents:pgAgents,logs:pgLogs,knowledge:pgKb,knowledgeLifecycle:pgKnowledgeLifecycle,
     security:pgSecurity,usage:pgUsage
   };
   const r=renderers[id];
