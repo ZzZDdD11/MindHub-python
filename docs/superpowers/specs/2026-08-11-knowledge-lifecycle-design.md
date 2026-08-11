@@ -46,7 +46,7 @@ pending_review ──审核通过──> approved ──创建草稿──> draf
 | 表 | 职责 | 关键约束 |
 | --- | --- | --- |
 | `conversation_candidates` 扩展列 | 审核信息 | `status`、`reviewed_at`、`review_note`；只允许服务层从待审状态审核 |
-| `knowledge_drafts` | 候选对应的可编辑草稿 | Candidate 唯一；保存 `title`、`summary`、`content`、`tags`、生成方式、状态 |
+| `knowledge_drafts` | 候选对应的可编辑草稿 | `(candidate_id, revision)` 唯一；保存 `title`、`summary`、`content`、`tags`、生成方式、状态 |
 | `knowledge_cards` | 稳定的发布实体 | Candidate 唯一；保存当前发布版本和状态 |
 | `knowledge_card_versions` | 不可变发布版本 | `(card_id, version)` 唯一；保存发布正文、标签、目标 `kb_id` |
 | `knowledge_card_projections` | KB 文档投影链接 | `(card_version_id, projection_type)` 唯一；记录 `kb_document_id` |

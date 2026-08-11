@@ -39,6 +39,7 @@
       <div class="page-container" data-page="agents" style="display:none"></div>
       <div class="page-container" data-page="logs" style="display:none"></div>
       <div class="page-container" data-page="knowledge" style="display:none"></div>
+      <div class="page-container" data-page="knowledgeLifecycle" style="display:none"></div>
       <div class="page-container" data-page="security" style="display:none"></div>
       <div class="page-container" data-page="usage" style="display:none"></div>
     </div>
@@ -62,6 +63,7 @@
 <script src="js/pages/agents.js"></script>
 <script src="js/pages/logs.js"></script>
 <script src="js/pages/knowledge.js"></script>
+<script src="js/pages/knowledge-lifecycle.js"></script>
 <script src="js/pages/security.js"></script>
 <script src="js/pages/usage.js"></script>
 <script>
@@ -73,7 +75,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()
 initTheme();
 renderNav();
 renderSidebarFooter();
-['dashboard','channels','apikeys','agents','logs','knowledge','security','usage'].forEach(id=>{
+['dashboard','channels','apikeys','agents','logs','knowledge','knowledgeLifecycle','security','usage'].forEach(id=>{
   updatePage(id);
 });
 loadDashboard();

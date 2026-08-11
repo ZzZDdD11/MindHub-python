@@ -380,12 +380,15 @@ class RagContextBuilder:
 class RagService:
     """RAG service: embed query, retrieve, build context, call LLM."""
 
-    def __init__(self, retriever_service, embedder_service, gateway_service, context_builder, search_strategy_factory=None):
+    def __init__(self, retriever_service, embedder_service, gateway_service, context_builder,
+                 search_strategy_factory=None, graph_repository=None, kb_repository=None):
         self.retriever_service = retriever_service
         self.embedder_service = embedder_service
         self.gateway_service = gateway_service
         self.context_builder = context_builder
         self.search_strategy_factory = search_strategy_factory
+        self.graph_repository = graph_repository
+        self.kb_repository = kb_repository
 
     def ask(self, kb_id, query, embedding_model, chat_model, top_k, history=None):
         query_embedding = self.embedder_service.embed(query, embedding_model)
@@ -452,16 +455,43 @@ class RagService:
             except Exception as e:
                 logger.warning(f"Vector search failed, falling back to keyword: {e}")
                 return self.retriever_service.keyword_search(kb_id, query, top_k)
-        # hybrid
+        # hybrid and graph_hybrid share the normal hybrid retrieval first.
         try:
             results = self.retriever_service.hybrid_search(kb_id, query, query_embedding, top_k, 0.7, 0.3)
-            if results:
-                return results
-            logger.info("Hybrid search returned no results, falling back to keyword search")
-            return self.retriever_service.keyword_search(kb_id, query, top_k)
+            if not results:
+                logger.info("Hybrid search returned no results, falling back to keyword search")
+                results = self.retriever_service.keyword_search(kb_id, query, top_k)
+            if mode == "graph_hybrid":
+                return self._expand_graph_results(kb_id, query, results, top_k)
+            return results
         except Exception as e:
             logger.warning(f"Hybrid search failed, falling back to keyword: {e}")
             return self.retriever_service.keyword_search(kb_id, query, top_k)
+
+    def _expand_graph_results(self, kb_id, query, base_results, top_k):
+        if not self.graph_repository or not self.kb_repository or len(base_results) >= top_k:
+            return base_results[:top_k]
+        try:
+            document_ids = self.graph_repository.graph_document_ids(kb_id, query, limit=3)
+            seen = {result.chunk_id for result in base_results}
+            expanded = list(base_results)
+            graph_added = 0
+            for document_id in document_ids[:3]:
+                for chunk in self.kb_repository.find_chunk_by_doc_id(document_id):
+                    if chunk.kb_id != kb_id or chunk.id in seen:
+                        continue
+                    expanded.append(SearchResultEntity(
+                        chunk_id=chunk.id, doc_id=chunk.doc_id, content=chunk.content,
+                        score=0.2, metadata={"graphExpanded": True},
+                    ))
+                    seen.add(chunk.id)
+                    graph_added += 1
+                    if graph_added >= 3 or len(expanded) >= top_k:
+                        return expanded
+            return expanded
+        except Exception as error:
+            logger.warning("Graph expansion failed; using hybrid results: %s", error)
+            return base_results[:top_k]
 
     def _call_llm(self, chat_model, prompt, history):
         messages = []

@@ -48,7 +48,10 @@ def test_enqueue_from_completed_record_creates_pending_candidate() -> None:
     assert len(candidate_repo.candidates) == 1
     assert set(vars(candidate)) == {
         "id", "conversation_record_id", "status", "eligibility_policy_version", "created_at", "updated_at",
+        "reviewed_at", "review_note",
     }
+    assert candidate.reviewed_at is None
+    assert candidate.review_note is None
 
 
 def test_enqueue_is_idempotent_and_unknown_source_is_ignored() -> None:

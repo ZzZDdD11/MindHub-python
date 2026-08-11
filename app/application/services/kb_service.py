@@ -4,6 +4,7 @@ import json
 import base64
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -88,6 +89,42 @@ class KbService:
         thread = threading.Thread(target=self._run_import_pipeline, args=(kb_id, entity.id, task.id, dto), daemon=True)
         thread.start()
         return self._to_doc_dto(entity)
+
+    def import_doc_sync(self, kb_id, dto: UploadDocDTO, document_id: str):
+        """Import a system-generated document synchronously and return only when it is searchable."""
+        deadline = time.monotonic() + 30
+        while True:
+            existing = self.repo.find_doc_by_id(document_id)
+            if existing and existing.kb_id != kb_id:
+                raise ValueError("Knowledge document ID belongs to another knowledge base")
+            if existing and existing.status == "ready":
+                return self._to_doc_dto(existing)
+            if existing and existing.status in {"pending", "processing"}:
+                if time.monotonic() >= deadline:
+                    raise ValueError("Knowledge base projection is already processing; retry later")
+                time.sleep(0.05)
+                continue
+            if existing:
+                self.repo.delete_doc_by_id(document_id)
+            now = _now()
+            entity = KbDocumentEntity(
+                id=document_id, kb_id=kb_id, name=dto.filename,
+                source_type=dto.source_type or "file", source_path=dto.filename,
+                status="pending", chunk_count=0, total_tokens=0, created_at=now, updated_at=now,
+            )
+            if not self.repo.save_doc_if_absent(entity):
+                continue
+            task = KbTaskEntity(
+                id=str(uuid.uuid4()), kb_id=kb_id, doc_id=entity.id, task_type="import",
+                status="pending", progress=0, total_items=0, done_items=0, created_at=now,
+            )
+            self.repo.save_task(task)
+            self._run_import_pipeline(kb_id, entity.id, task.id, dto)
+            completed = self.repo.find_doc_by_id(entity.id)
+            if not completed or completed.status != "ready":
+                detail = completed.error_message if completed else "document was not created"
+                raise ValueError(f"Knowledge base projection failed: {detail or 'unknown error'}")
+            return self._to_doc_dto(completed)
 
     def _run_import_pipeline(self, kb_id, doc_id, task_id, dto):
         try:

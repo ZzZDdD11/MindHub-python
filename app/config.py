@@ -50,6 +50,7 @@ class GatewayConfig:
 @dataclass
 class AppConfig:
     server_port: int = int(os.getenv("SERVER_PORT", "9900"))
+    knowledge_pipeline_model: str | None = os.getenv("KNOWLEDGE_PIPELINE_MODEL")
     db: DatabaseConfig = field(default_factory=DatabaseConfig)
     security: SecuritySettings = field(default_factory=SecuritySettings)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)

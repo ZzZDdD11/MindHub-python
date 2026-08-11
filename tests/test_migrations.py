@@ -10,6 +10,7 @@ def test_default_migration_directory_contains_versioned_sql() -> None:
     assert (MIGRATIONS_DIR / "0002_request_log_stream_outcome.sql").is_file()
     assert (MIGRATIONS_DIR / "0003_create_conversation_records.sql").is_file()
     assert (MIGRATIONS_DIR / "0004_create_conversation_candidates.sql").is_file()
+    assert (MIGRATIONS_DIR / "0005_create_knowledge_lifecycle.sql").is_file()
 
 
 def test_applies_ordered_migrations_only_once(tmp_path: Path) -> None:

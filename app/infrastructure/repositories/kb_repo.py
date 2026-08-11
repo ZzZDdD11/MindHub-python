@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.infrastructure.database.connection import get_db
 from app.domain.entities import (
@@ -98,6 +99,13 @@ class KbRepository:
                 ":chunk_count, :total_tokens, :error_message, :created_at, :updated_at)"
             ), self._doc_params(entity))
 
+    def save_doc_if_absent(self, entity: KbDocumentEntity) -> bool:
+        try:
+            self.save_doc(entity)
+            return True
+        except IntegrityError:
+            return False
+
     def update_doc(self, entity: KbDocumentEntity):
         if not entity.updated_at:
             entity.updated_at = _now()
@@ -127,6 +135,7 @@ class KbRepository:
     def delete_doc_by_id(self, doc_id: str):
         with get_db() as db:
             db.execute(text("DELETE FROM kb_chunks WHERE doc_id = :id"), {"id": doc_id})
+            db.execute(text("DELETE FROM kb_tasks WHERE doc_id = :id"), {"id": doc_id})
             db.execute(text("DELETE FROM kb_documents WHERE id = :id"), {"id": doc_id})
 
     def update_doc_status(self, doc_id: str, status: str, error_message: Optional[str]):

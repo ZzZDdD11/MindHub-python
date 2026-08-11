@@ -273,6 +273,21 @@ class SecurityFindingDTO(BaseModel):
     created_at: Optional[str] = None
 
 
+class CandidateReviewDTO(BaseModel):
+    note: Optional[str] = None
+
+
+class KnowledgeDraftDTO(BaseModel):
+    title: str = ""
+    summary: str = ""
+    content: str = ""
+    tags: list[str] = []
+
+
+class KnowledgePublishDTO(BaseModel):
+    kb_id: str
+
+
 class ImportSourceDTO(BaseModel):
     source_type: str = "git"
     repo_url: Optional[str] = None
